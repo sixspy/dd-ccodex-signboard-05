@@ -7,11 +7,39 @@ from fastapi import APIRouter, Header, HTTPException
 from audit_svc import write_audit, write_history
 from auth import current_user, require_writer
 from db import connect, rows_to_list
+from history_svc import record_history
 from locks import acquire, release
 from policies import assert_override_payload
 from validators import require_effect, require_positive_int
 
 router = APIRouter(prefix="/api/overrides", tags=["overrides"])
+
+
+def cascade_deactivate_overrides(conn, screen_id: int, ticket: str, actor: str) -> list[dict]:
+    """撤屏级联（大堂撤屏级联案）：同事务停用该屏全部活跃正式覆盖，逐条同票落痕。
+
+    只负责覆盖域写；事务边界由撤屏服务编排，任一步失败随整笔回滚。
+    """
+    rows = rows_to_list(
+        conn.execute(
+            "SELECT * FROM overrides WHERE screen_id=? AND official=1 AND active=1 ORDER BY id",
+            (screen_id,),
+        ).fetchall()
+    )
+    conn.execute(
+        "UPDATE overrides SET active=0 WHERE screen_id=? AND official=1 AND active=1",
+        (screen_id,),
+    )
+    for row in rows:
+        record_history(
+            conn,
+            "override",
+            row["id"],
+            "panic_cascade_off",
+            f"票{ticket}｜撤屏级联停用｜effect={row['effect']}",
+            actor,
+        )
+    return rows
 
 
 @router.get("")

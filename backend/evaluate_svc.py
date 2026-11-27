@@ -52,6 +52,19 @@ def evaluate_screen(body: dict, authorization: str | None = Header(default=None)
             (screen_id,),
         ).fetchone()
         if not pub:
+            panic = conn.execute(
+                "SELECT * FROM panic_events WHERE screen_id=? AND official=1 ORDER BY id DESC LIMIT 1",
+                (screen_id,),
+            ).fetchone()
+            if panic:
+                return {
+                    "source": "empty",
+                    "play": None,
+                    "now_hm": now_hm,
+                    "reason": "紧急撤屏",
+                    "panic_id": panic["id"],
+                    "ticket": f"panic#{panic['id']}",
+                }
             return {"source": "empty", "play": None, "now_hm": now_hm, "reason": "无正式发布"}
         window = conn.execute(
             "SELECT * FROM time_windows WHERE id=?",
